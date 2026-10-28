@@ -44,7 +44,7 @@ async function mediaState(page) {
 }
 
 async function expectMediaFlow(page) {
-    await expect(page.getByText('Video connected', { exact: true })).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByText('Connected', { exact: true })).toBeVisible({ timeout: 45_000 });
     await expect.poll(async () => {
         const state = await mediaState(page);
         return state.connected && state.peers === 1 && state.audioBytes > 0 && state.videoBytes > 0 && state.videoFrames > 0;
