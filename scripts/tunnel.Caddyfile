@@ -1,0 +1,83 @@
+{
+	admin off
+	auto_https off
+}
+
+(forward_headers) {
+	# cloudflared is the only public ingress. Ignore visitor-supplied X-Forwarded-*.
+	header_up X-Forwarded-For {http.request.header.Cf-Connecting-Ip}
+	header_up X-Forwarded-Proto https
+	header_up Host {$DRIFT_TUNNEL_HOST}
+	header_up -X-Forwarded-Host
+	header_up -X-Forwarded-Port
+	header_up -Forwarded
+}
+
+http://:18090 {
+	bind 127.0.0.1
+	@wrong_host not host {$DRIFT_TUNNEL_HOST}
+	respond @wrong_host 404
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		X-Frame-Options DENY
+		Permissions-Policy "camera=(self), microphone=(self), autoplay=(self), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://{$DRIFT_TUNNEL_HOST}; media-src 'self' blob:; img-src 'self' data:; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+	@websocket {
+		method GET
+		path /app/*
+	}
+	handle @websocket {
+		reverse_proxy 127.0.0.1:18080 {
+			import forward_headers
+		}
+	}
+	@assets {
+		method GET HEAD
+		path /tunnel-build/* /favicon.ico /robots.txt
+	}
+	handle @assets {
+		root * "{$DRIFT_PROJECT_PUBLIC}"
+		file_server
+	}
+	@page {
+		method GET HEAD
+		path /
+	}
+	handle @page {
+		reverse_proxy 127.0.0.1:18000 {
+			import forward_headers
+		}
+	}
+	@signaling {
+		method POST
+		path /chat/signal
+	}
+	handle @signaling {
+		# Bounded SDP and ICE signaling; application validation still applies.
+		request_body {
+			max_size 128KB
+		}
+		reverse_proxy 127.0.0.1:18000 {
+			import forward_headers
+		}
+	}
+	@actions {
+		method POST
+		path /chat/start /chat/next /chat/stop /chat/heartbeat /chat/message /chat/report /chat/block /broadcasting/auth
+	}
+	handle @actions {
+		request_body {
+			max_size 16KB
+		}
+		reverse_proxy 127.0.0.1:18000 {
+			import forward_headers
+		}
+	}
+	# Never proxy signed Reverb publishing APIs, dev tooling or arbitrary files.
+	handle {
+		respond 404
+	}
+}
